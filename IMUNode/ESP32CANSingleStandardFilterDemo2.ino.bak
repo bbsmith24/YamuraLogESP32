@@ -1,0 +1,144 @@
+//----------------------------------------------------------------------------------------
+// ESP32 CAN test
+//----------------------------------------------------------------------------------------
+//  Board Check
+//----------------------------------------------------------------------------------------
+
+#ifndef ARDUINO_ARCH_ESP32
+  #error "Select an ESP32 board"
+#endif
+
+//----------------------------------------------------------------------------------------
+//   Include files
+//----------------------------------------------------------------------------------------
+
+#include <ACAN_ESP32.h>
+
+//----------------------------------------------------------------------------------------
+//  ESP32 Desired Bit Rate
+//----------------------------------------------------------------------------------------
+
+static const uint32_t DESIRED_BIT_RATE = 1000UL * 1000UL;
+
+CANMessage sendFrame;
+CANMessage rcvFrame;
+unsigned long curTime;
+unsigned long offsetTime;
+unsigned long remoteTimeOffset;
+static uint32_t blinkLedTime = 0;
+static uint32_t sendDataTime = 0;
+
+//----------------------------------------------------------------------------------------
+//   SETUP
+//----------------------------------------------------------------------------------------
+void setup () 
+{
+//--- Switch on builtin led
+  pinMode(12, OUTPUT);
+  digitalWrite(12, HIGH);
+//--- Start serial
+  Serial.begin (115200);
+  delay (100);
+//--- Configure ESP32 CAN
+  Serial.println("ESP32 CAN - Sensor Node");
+  ACAN_ESP32_Settings settings (DESIRED_BIT_RATE);
+  settings.mRequestedCANMode = ACAN_ESP32_Settings::NormalMode;
+  const ACAN_ESP32_Filter filter = ACAN_ESP32_Filter::singleStandardFilter (ACAN_ESP32_Filter::data, 0x0, 0x404) ;
+  //const ACAN_ESP32_Filter filter = ACAN_ESP32_Filter::acceptStandardFrames();
+
+  const uint32_t errorCode = ACAN_ESP32::can.begin (settings, filter);
+  if (errorCode == 0) 
+  {
+    Serial.print("Bit Rate prescaler: ");
+    Serial.println(settings.mBitRatePrescaler);
+    Serial.print("Time Segment 1:     ");
+    Serial.println(settings.mTimeSegment1);
+    Serial.print("Time Segment 2:     ");
+    Serial.println(settings.mTimeSegment2);
+    Serial.print ("RJW:                ");
+    Serial.println (settings.mRJW);
+    Serial.print("Triple Sampling:    ");
+    Serial.println(settings.mTripleSampling ? "yes" : "no");
+    Serial.print("Actual bit rate:    ");
+    Serial.print(settings.actualBitRate());
+    Serial.println(" bit/s");
+    Serial.print("Exact bit rate ?    ");
+    Serial.println(settings.exactBitRate() ? "yes" : "no");
+    Serial.print("Sample point:       ");
+    Serial.print(settings.samplePointFromBitStart());
+    Serial.println("%");
+    Serial.println("Configuration OK!");
+  }
+  else
+  {
+    Serial.print ("Configuration error 0x");
+    Serial.println (errorCode, HEX);
+  }
+  curTime = millis();
+  offsetTime = 0;
+  remoteTimeOffset = 0;
+}
+//----------------------------------------------------------------------------------------
+//   LOOP
+//----------------------------------------------------------------------------------------
+void loop() 
+{
+  if (blinkLedTime < millis()) 
+  {
+    blinkLedTime += 1000;
+    digitalWrite(12, !digitalRead (12));
+  }
+  if(sendDataTime < millis())
+  {
+    sendDataTime += 100;
+    SendFrame();
+  }
+  ReceiveFrame();
+  delay(1);
+}
+void SendFrame()
+{
+  sendFrame.id = 0x124;
+  sendFrame.rtr = false;
+  sendFrame.ext = false;
+  sendFrame.len = 8;
+  curTime = millis() + remoteTimeOffset;
+  sendFrame.data32[0] = curTime;
+  sendFrame.data_s8[4] = 0xA;
+  sendFrame.data_s8[5] = 0xB;
+  sendFrame.data_s8[6] = 0xC;
+  sendFrame.data_s8[7] = 0xD;
+  Serial.printf("%d\tOUT\tid 0x%03x\tbytes\t%d\tdata", millis() + remoteTimeOffset,
+                                                       sendFrame.id,
+                                                       sendFrame.len);
+  for(int idx = 0; idx < 8; idx++)
+  {
+    Serial.printf("\t0x%02X", (sendFrame.data_s8[idx] & 0xFF));
+  }
+
+  if (!ACAN_ESP32::can.tryToSend (sendFrame)) 
+  {
+    Serial.printf("\tFAILED TO SEND FRAME ID 0x%X!!!", sendFrame.id);
+  }
+  Serial.println();      
+}
+void ReceiveFrame()
+{
+  if (ACAN_ESP32::can.receive (rcvFrame)) 
+  {
+    Serial.printf("%d\tIN\tid 0x%03x\tbytes\t%d\tdata", millis() + remoteTimeOffset,
+                                                         rcvFrame.id,
+                                                         rcvFrame.len);
+    for(int idx = 0; idx < 8; idx++)
+    {
+      Serial.printf("\t0x%02X", (rcvFrame.data_s8[idx] & 0xFF));
+    }
+    // heartbeat message
+    if(rcvFrame.id == 0)
+    {
+      remoteTimeOffset = rcvFrame.data32[0] - millis();
+      Serial.printf(" heartbeat %d\t", remoteTimeOffset);
+    }
+    Serial.println();
+  }
+}
