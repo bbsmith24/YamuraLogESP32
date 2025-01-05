@@ -1,5 +1,5 @@
 //----------------------------------------------------------------------------------------
-// YamuraLog - ESP32 Hub test
+// YamuraLog - ESP32 Hub
 //----------------------------------------------------------------------------------------
 #ifndef ARDUINO_ARCH_ESP32
   #error "Select an ESP32 board"
@@ -9,77 +9,20 @@
 //   Include files
 //----------------------------------------------------------------------------------------
 
-#include <Arduino.h>
-#include"rom/gpio.h"
-#include <ACAN_ESP32.h>
-#include "FS.h"
-#include "SD.h"
-#include "SPI.h"
-#include <esp_task_wdt.h>
-#include <Wire.h>
-#include <DS3231-RTC.h>
+#include "HubBase.h"
 
-#define YAMURANODE_ID 0
-//#define DEBUG_VERBOSE
-#define INITIAL_DELAY  10000
-#define LOG_START      30000
-#define LOG_END        60000
-#define LOG_DURATION 60000
-// buffer and index to next store point in current logging buffer
-// loadBufferIdx is 0 or 1, don't add to buffer if loadBufferIdx == storeBufferIdx
-int loadBufferIdx = 0;
-int loadBufferByteIdx[2] = {0, 0};
-int logFileIdx = 0;
-// -1 for available (nothing ready to write)
-// 0 or 1 for store buffer to microSD
-int storeBufferIdx = -1;
-
-File logFile;
-
-int coreLED[2] = {14, 12};
-
-TaskHandle_t Task0;
-TaskHandle_t Task1;
-// 2 1024 byte buffers - one for active store from CAN, 1 for write to microSD
-uint8_t dualBuffer[2][1024];
-char logFileName[256];
-unsigned long logEnd = 0;
-
-//----------------------------------------------------------------------------------------
-//  ESP32 Desired Bit Rate
-//----------------------------------------------------------------------------------------
-static const uint32_t DESIRED_BIT_RATE = 1000UL * 1000UL;
-CANMessage sendFrame;
-CANMessage rcvFrame;
-uint32_t sendDataTime = 0;
-bool logging;
-//
-// RTC device
-//
-DS3231 rtcDevice;
-byte year;
-int actualYear;
-byte month;
-byte date;
-byte dOW;
-byte hour;
-byte minute;
-byte second;
-bool h12Flag;
-bool pmFlag;
-char amPM[16];
-bool century = false;
-char dowName[7][16] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" };
 //----------------------------------------------------------------------------------------
 //   SETUP
 //----------------------------------------------------------------------------------------
 void setup () 
 {
+  int w = 0;
+  int h = 0;
   pinMode(coreLED[0], OUTPUT);
   pinMode(coreLED[1], OUTPUT);
   digitalWrite(coreLED[0], LOW);
   digitalWrite(coreLED[1], HIGH);
-  for(int idx = 0; idx < 20; idx++)
+  for(int idx = 0; idx < 30; idx++)
   {
       digitalWrite(coreLED[0], !digitalRead(coreLED[0]));
       digitalWrite(coreLED[1], !digitalRead(coreLED[1]));
@@ -92,17 +35,59 @@ void setup ()
   Serial.println("=============================");
   Serial.println("| YamuraLogESP32 - Hub Base |");
   Serial.println("=============================");
+
+  sprintf(buffer512, "SDO: %d SDI: %d CLK %d TFT CS %d microSD CS %d\n", TFT_MOSI, TFT_MISO, TFT_SCLK, TFT_CS, SD_CS);
+  Serial.print(buffer512);
+
   // microSD setup
-  Serial.println("microSD card setup");
-  Serial.println("==================");
+  Serial.println("======================");
+  Serial.println("| microSD card setup |");
+  Serial.println("======================");
   //SdFile::SD_dateTimeCallback(SD_DateTime);
-  while(!SD.begin(15))
+  bool alreadyFailed = false;
+  // TODO - for some reason, this needs to be called prior to initing the TFT display
+  //        if called after, microSD won't mount?
+  while(!SD.begin(SD_CS))
   {
-    Serial.println("Card Mount Failed");
+    if(!alreadyFailed)
+    {
+      Serial.println("Card Mount Failed");
+      alreadyFailed = true;
+    }
+    digitalWrite(coreLED[0], !digitalRead(coreLED[0]));
+    digitalWrite(coreLED[1], !digitalRead(coreLED[0]));
     delay(1000);
   }
-  uint8_t cardType = SD.cardType();
+  digitalWrite(coreLED[0], LOW);
+  digitalWrite(coreLED[1], LOW);
 
+  Serial.println("=====================");
+  Serial.println("| tft display setup |");
+  Serial.println("=====================");
+  tftDisplay.init();
+  tftDisplay.invertDisplay(false);
+  RotateDisplay(true);  
+  w = tftDisplay.width();
+  h = tftDisplay.height();
+  textPosition[0] = 5;
+  textPosition[1] = 0;
+  // 0 portrait pins down
+  // 1 landscape pins right
+  // 2 portrait pins up
+  // 3 landscape pins left
+  tftDisplay.fillScreen(TFT_BLACK);
+  YamuraBanner();
+  SetFont(deviceSettings.fontPoints);
+  tftDisplay.setTextColor(TFT_WHITE, TFT_BLACK);
+  tftDisplay.drawString("Yamura Motors LLC Data Logger", textPosition[0], textPosition[1], GFXFF);
+  textPosition[1] += fontHeight;
+  delay (1000);
+
+  // microSD setup
+  Serial.println("======================");
+  Serial.println("| microSD card setup |");
+  Serial.println("======================");
+  uint8_t cardType = SD.cardType();
   while(cardType == CARD_NONE)
   {
     Serial.println("No SD card attached");
@@ -130,9 +115,67 @@ void setup ()
   }
   uint64_t cardSize = SD.cardSize() / (1024 * 1024);
   Serial.printf("SD Card Size: %lluMB\n", cardSize);
+  Serial.println("=====================");
+  Serial.println("| tft display setup |");
+  Serial.println("=====================");
+  tftDisplay.init();
+  tftDisplay.invertDisplay(false);
+  RotateDisplay(true);  
+  w = tftDisplay.width();
+  h = tftDisplay.height();
+  textPosition[0] = 5;
+  textPosition[1] = 0;
+  // 0 portrait pins down
+  // 1 landscape pins right
+  // 2 portrait pins up
+  // 3 landscape pins left
+  tftDisplay.fillScreen(TFT_BLACK);
+  YamuraBanner();
+  SetFont(deviceSettings.fontPoints);
+  tftDisplay.setTextColor(TFT_WHITE, TFT_BLACK);
+  tftDisplay.drawString("Yamura Motors LLC Data Logger", textPosition[0], textPosition[1], GFXFF);
+  textPosition[1] += fontHeight;
+  tftDisplay.drawString("microSD card mounted", textPosition[0], textPosition[1], GFXFF);
+  textPosition[1] += fontHeight;
+  // RTC
+  Serial.println("=============");
+  Serial.println("| RTC setup |");
+  Serial.println("=============");
+
+  Wire.begin();
+  actualYear = 2000 + (century ? 100 : 0) + rtcDevice.getYear();
+	month = rtcDevice.getMonth(century);
+  date = rtcDevice.getDate();
+	dOW = rtcDevice.getDoW();
+	hour = rtcDevice.getHour(h12Flag, pmFlag);
+	minute = rtcDevice.getMinute();
+	second = rtcDevice.getSecond();
+	// Add AM/PM indicator
+	if (h12Flag) 
+  {
+		if (pmFlag) 
+    {
+			sprintf(amPM, "PM");
+		} 
+    else 
+    {
+			sprintf(amPM, "AM");
+		}
+	} 
+  else 
+  {
+  	sprintf(amPM, "24H");
+	}
+  sprintf(buffer512, "%s %02d/%02d/%04d %02d:%02d:%02d %s", dowName[dOW], month, date, actualYear, hour, minute, second, amPM);
+  Serial.println("RTC OK");
+  Serial.println(buffer512);
+  tftDisplay.drawString(buffer512, textPosition[0], textPosition[1], GFXFF);
+  textPosition[1] += fontHeight;
+
   // CAN setup
-  Serial.println("CAN setup");
-  Serial.println("=========");
+  Serial.println("=============");
+  Serial.println("| CAN setup |");
+  Serial.println("=============");
   ACAN_ESP32_Settings settings (DESIRED_BIT_RATE);
   settings.mRequestedCANMode = ACAN_ESP32_Settings::NormalMode;
   // receive all standard IDs
@@ -160,38 +203,16 @@ void setup ()
     Serial.print(settings.samplePointFromBitStart());
     Serial.println("%");
     Serial.println("Configuration OK!");
+    sprintf(buffer512, "CAN configuration OK!");
   }
   else
   {
     Serial.print ("Configuration error 0x");
     Serial.println (errorCode, HEX);
+    sprintf(buffer512, "CAN configuration error 0x%X", errorCode);
   }
-  // RTC
-  Wire.begin();
-  actualYear = 2000 + (century ? 100 : 0) + rtcDevice.getYear();
-	month = rtcDevice.getMonth(century);
-  date = rtcDevice.getDate();
-	dOW = rtcDevice.getDoW();
-	hour = rtcDevice.getHour(h12Flag, pmFlag);
-	minute = rtcDevice.getMinute();
-	second = rtcDevice.getSecond();
-	// Add AM/PM indicator
-	if (h12Flag) 
-  {
-		if (pmFlag) 
-    {
-			sprintf(amPM, "PM");
-		} 
-    else 
-    {
-			sprintf(amPM, "AM");
-		}
-	} 
-  else 
-  {
-  	sprintf(amPM, "24H");
-	}
-  Serial.printf("Current time %s %02d/%02d/%04d %02d:%02d:%02d %s\n", dowName[dOW], month, date, actualYear, hour, minute, second, amPM);
+  tftDisplay.drawString(buffer512, textPosition[0], textPosition[1], GFXFF);
+  textPosition[1] += fontHeight;
   //
   logging = false;
   Serial.println("Starting WriteToSDTask on core 0");
@@ -319,12 +340,12 @@ void ReceiveFrame()
   #ifdef DEBUG_VERBOSE
   Serial.printf("%d Receive ID 0x%02X\n", millis(), rcvFrame.id);
   #endif
-  /*
-  if((rcvFrame.id == 10) ||(rcvFrame.id == 11))
-  {
-    Serial.printf("%d Receive ID 0x%02X\n", millis(), rcvFrame.id);
-  }
-  */
+  //
+  //if((rcvFrame.id == 10) ||(rcvFrame.id == 11))
+  //{
+  //  Serial.printf("%d Receive ID 0x%02X\n", millis(), rcvFrame.id);
+  //}
+  //
   if(loadBufferIdx == storeBufferIdx)
   {
     digitalWrite(coreLED[0], HIGH);
@@ -415,4 +436,69 @@ void SD_DateTime(uint16_t* date, uint16_t* time)
 	second =  rtcDevice.getSecond();
   //*date =  FAT_DATE(actualYear, month, day);
   //*time =  FAT_TIME(hour, minute, second);
+}
+//
+// TFT display
+//
+//
+// rotate display for right or left hand use
+//
+void RotateDisplay(bool rotateButtons)
+{
+  tftDisplay.setRotation(deviceSettings.screenRotation == 0 ? 1 : 3);
+  tftDisplay.fillScreen(TFT_WHITE);
+ // if(rotateButtons)
+//  {
+//    int reverseButtons[BUTTON_COUNT];
+//    for(int btnIdx = 0; btnIdx < BUTTON_COUNT; btnIdx++)
+//    {
+//      reverseButtons[BUTTON_COUNT - (btnIdx + 1)] = buttons[btnIdx].buttonPin;
+//    }
+//    for(int btnIdx = 0; btnIdx < BUTTON_COUNT; btnIdx++)
+//    {
+//      buttons[btnIdx].buttonPin = reverseButtons[btnIdx];
+//    }
+//  }
+}
+//
+// draw the Yamura banner at bottom of screen
+//
+void YamuraBanner()
+{
+  Serial.println("Data Logger");
+  tftDisplay.setTextColor(TFT_BLACK, TFT_YELLOW);
+  SetFont(9);
+  int xPos = tftDisplay.width()/2;
+  int yPos = tftDisplay.height() - fontHeight/2;
+  tftDisplay.setTextDatum(BC_DATUM);
+  tftDisplay.drawString("  Yamura Motors LLC Data Logger  ",xPos, yPos, GFXFF);    // Print the font name onto the TFT screen
+  tftDisplay.setTextDatum(TL_DATUM);
+}
+//
+// set font for TFT display, update fontHeight used for vertical stepdown by line
+//
+void SetFont(int fontSize)
+{
+  Serial.printf("Font Size %d\n", fontSize);
+  switch(fontSize)
+  {
+    case 9:
+      tftDisplay.setFreeFont(FSS9);
+      break;
+    case 12:
+      tftDisplay.setFreeFont(FSS12);
+      break;
+    case 18:
+      tftDisplay.setFreeFont(FSS18);
+      break;
+    case 24:
+      tftDisplay.setFreeFont(FSS24); // was FSS18
+      break;
+    default:
+      tftDisplay.setFreeFont(FSS12);
+      break;
+  }
+  tftDisplay.setTextDatum(TL_DATUM);
+  fontHeight = tftDisplay.fontHeight(GFXFF);
+  fontWidth = tftDisplay.textWidth("X");
 }
