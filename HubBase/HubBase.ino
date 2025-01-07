@@ -38,7 +38,6 @@ void setup ()
 
   sprintf(buffer512, "SDO: %d SDI: %d CLK %d TFT CS %d microSD CS %d\n", TFT_MOSI, TFT_MISO, TFT_SCLK, TFT_CS, SD_CS);
   Serial.print(buffer512);
-
   // microSD setup
   Serial.println("======================");
   Serial.println("| microSD card setup |");
@@ -55,11 +54,9 @@ void setup ()
       alreadyFailed = true;
     }
     digitalWrite(coreLED[0], !digitalRead(coreLED[0]));
-    digitalWrite(coreLED[1], !digitalRead(coreLED[0]));
     delay(1000);
   }
   digitalWrite(coreLED[0], LOW);
-  digitalWrite(coreLED[1], LOW);
 
   Serial.println("=====================");
   Serial.println("| tft display setup |");
@@ -113,30 +110,37 @@ void setup ()
   {
     Serial.println("UNKNOWN");
   }
-  uint64_t cardSize = SD.cardSize() / (1024 * 1024);
-  Serial.printf("SD Card Size: %lluMB\n", cardSize);
-  Serial.println("=====================");
-  Serial.println("| tft display setup |");
-  Serial.println("=====================");
-  tftDisplay.init();
-  tftDisplay.invertDisplay(false);
-  RotateDisplay(true);  
-  w = tftDisplay.width();
-  h = tftDisplay.height();
-  textPosition[0] = 5;
-  textPosition[1] = 0;
-  // 0 portrait pins down
-  // 1 landscape pins right
-  // 2 portrait pins up
-  // 3 landscape pins left
-  tftDisplay.fillScreen(TFT_BLACK);
-  YamuraBanner();
-  SetFont(deviceSettings.fontPoints);
-  tftDisplay.setTextColor(TFT_WHITE, TFT_BLACK);
-  tftDisplay.drawString("Yamura Motors LLC Data Logger", textPosition[0], textPosition[1], GFXFF);
+  char magnitude[5][16] = {"bytes", "KB", "MB", "GB", "TB"};
+  totalUsedSpace = 0.0;
+  listDir(SD, "/", 10);
+  float cardSize = (float)SD.cardSize();// / (1024 * 1024);
+  float freeSize = cardSize - totalUsedSpace;
+  int cardMagnitudeCount = 0;
+  int freeMagnitudeCount = 0;
+  int usedMagnitudeCount = 0;
+  while(cardSize > 1024.0)
+  {
+    cardSize /= 1024.0;
+    cardMagnitudeCount++;
+  }
+  while(freeSize > 1024.0)
+  {
+    freeSize /= 1024.0;
+    freeMagnitudeCount++;
+  }
+  while(totalUsedSpace > 1024.0)
+  {
+    totalUsedSpace /= 1024.0;
+    usedMagnitudeCount++;
+  }
+
+  sprintf(buffer512, "SD %0.2f%s used %0.2f%s free of %0.2f%s", totalUsedSpace, magnitude[usedMagnitudeCount],
+                                                                freeSize, magnitude[freeMagnitudeCount],
+                                                                cardSize, magnitude[cardMagnitudeCount]);
+  Serial.println(buffer512);
+  tftDisplay.drawString(buffer512, textPosition[0], textPosition[1], GFXFF);
   textPosition[1] += fontHeight;
-  tftDisplay.drawString("microSD card mounted", textPosition[0], textPosition[1], GFXFF);
-  textPosition[1] += fontHeight;
+
   // RTC
   Serial.println("=============");
   Serial.println("| RTC setup |");
@@ -227,20 +231,31 @@ void setup ()
                     1,           // priority of the task
                     &Task0,      // Task handle to keep track of created task
                     0);          // pin task to core 0
-  BaseType_t coreID = xPortGetCoreID();
   while(millis() < INITIAL_DELAY)
   {
     if ((millis()  % 2000) == 0)
     {
-      digitalWrite(coreLED[coreID], HIGH);
+      digitalWrite(coreLED[0], HIGH);
     }
     else if ((millis()  % 1000) == 0)
     {
-      digitalWrite(coreLED[coreID], LOW);
+      digitalWrite(coreLED[0], LOW);
     }
   }
-  digitalWrite(coreLED[coreID], LOW);
+  digitalWrite(coreLED[0], LOW);
   Serial.printf("HUB ID 0x%02X Start!\n", YAMURANODE_ID);
+  Serial.println("================");
+  Serial.println("| User buttons |");
+  Serial.println("================");
+  buttons[0].buttonPin = BUTTON_0;
+  buttons[1].buttonPin = BUTTON_1;
+  buttons[2].buttonPin = BUTTON_2;
+  for(int idx = 0; idx < BUTTON_COUNT; idx++)
+  {
+    Serial.printf("Buttons[%d].buttonPin = %d\n", idx, buttons[idx].buttonPin);
+    pinMode(buttons[idx].buttonPin, INPUT_PULLUP);
+  }
+  CheckButtons(millis());
 }
 //----------------------------------------------------------------------------------------
 //   LOOP
@@ -248,30 +263,35 @@ void setup ()
 void loop() 
 {
   BaseType_t coreID;
-  if ((millis()  % 2000) == 0)
+  if ((millis() % 2000) == 0)
   {
-    coreID = xPortGetCoreID();
-    digitalWrite(coreLED[coreID], HIGH);
+    digitalWrite(coreLED[0], HIGH);
   }
   else if ((millis()  % 1000) == 0)
   {
-    coreID = xPortGetCoreID();
-    digitalWrite(coreLED[coreID], LOW);
+    digitalWrite(coreLED[0], LOW);
   }
 
   if((logging == false) && (millis() % 10000 == 0))
   {
     SendFrame(0); // heartbeat
   }
+  // check buttons
+  CheckButtons(millis());
   // start logging on any serial input
-  if((logging == false) && (Serial.available() > 0))
+  if(buttons[0].buttonReleased == true)
   {
-    if(Serial.read() == 'S')
+    buttons[0].buttonReleased = false;
+    if(logging == false)
     {
       logFileIdx++;
       sprintf(logFileName, "/logFile%d.log", logFileIdx);
-      logEnd = millis() + LOG_DURATION;
-      Serial.printf("START LOGGING to %s at %d, end at %d\n", logFileName, millis(), logEnd);
+	    hour = rtcDevice.getHour(h12Flag, pmFlag);
+      minute = rtcDevice.getMinute();
+      second = rtcDevice.getSecond();
+      sprintf(buffer512, " %02d:%02d:%02d START LOG %s          ", hour, minute, second, logFileName);
+      Serial.println(buffer512);
+      tftDisplay.drawString(buffer512, textPosition[0], fontHeight * 8, GFXFF);
       deleteFile(SD, logFileName);
       logFile = SD.open(logFileName, FILE_WRITE);
       logFile.print("XXXXXXXXXXXX");
@@ -281,30 +301,32 @@ void loop()
       }
       else
       {
+        logStart= millis();
         logging = true;
-        coreID = xPortGetCoreID();
-        Serial.print("Core ");
-        Serial.print(coreID);
-        Serial.print(" ");
         SendFrame(1); // start logging
       }
     }
-    Serial.flush();
-  }
-  if((logging == true) && (millis() > logEnd))
-  {
-    logging = false;
-    coreID = xPortGetCoreID();
-    Serial.print("Core ");
-    Serial.print(coreID);
-    Serial.print(" ");
-    Serial.printf("STOP LOGGING to %s at %d\n", logFileName, millis());
-    logFile.close();
-    SendFrame(2); // stop logging
+    else if(logging == true)
+    {
+      logging = false;
+    	hour = rtcDevice.getHour(h12Flag, pmFlag);
+	    minute = rtcDevice.getMinute();
+  	  second = rtcDevice.getSecond();
+
+      logFile.close();
+      SendFrame(2); // stop logging
+      logEnd= millis();
+      sprintf(buffer512, " %02d:%02d:%02d END LOG %s %0.2fs         ", hour, minute, second, logFileName, (float)(logEnd-logStart)/1000.0);
+      tftDisplay.drawString(buffer512, textPosition[0], fontHeight * 8, GFXFF);
+      Serial.println(buffer512);
+    }
   }
   ReceiveFrame();
   delay(1);
 }
+//
+//
+//
 void SendFrame(int subID)
 {
   sendFrame.id = YAMURANODE_ID;
@@ -340,15 +362,26 @@ void ReceiveFrame()
   #ifdef DEBUG_VERBOSE
   Serial.printf("%d Receive ID 0x%02X\n", millis(), rcvFrame.id);
   #endif
-  //
-  //if((rcvFrame.id == 10) ||(rcvFrame.id == 11))
-  //{
-  //  Serial.printf("%d Receive ID 0x%02X\n", millis(), rcvFrame.id);
-  //}
-  //
+  // heartbeat ack
+  if(!logging)
+  {
+    int nodeIdx = 0;
+    while(expectedIDs[nodeIdx] > 0)
+    {
+      if((expectedIDs[nodeIdx] == rcvFrame.id) && (reportedIDs[nodeIdx] == false))
+      {
+        reportedIDs[nodeIdx] = true;
+        sprintf(buffer512, "Node ID 0x%02X %s %s", expectedIDs[nodeIdx], 
+                                                   expectedNames[nodeIdx], 
+                                                   "OK");
+        tftDisplay.drawString(buffer512, textPosition[0], ((4 + nodeIdx) * fontHeight), GFXFF);
+      }
+      nodeIdx++;
+    }
+  }
   if(loadBufferIdx == storeBufferIdx)
   {
-    digitalWrite(coreLED[0], HIGH);
+    digitalWrite(coreLED[1], HIGH);
     Serial.println("wait for microSD write to complete");
   }
   // check for available space in buffer for current message
@@ -396,10 +429,6 @@ void deleteFile(fs::FS &fs, const char * path)
 //
 void WriteToSDTask( void * pvParameters )
 {
-  BaseType_t coreID = xPortGetCoreID();
-  Serial.print("WriteToSDTask running on core ");
-  Serial.println(xPortGetCoreID());
-
   for(;;)
   {
     while(storeBufferIdx < 0)
@@ -438,30 +467,29 @@ void SD_DateTime(uint16_t* date, uint16_t* time)
   //*time =  FAT_TIME(hour, minute, second);
 }
 //
-// TFT display
-//
-//
-// rotate display for right or left hand use
+// rotate TFT display for right or left hand use
 //
 void RotateDisplay(bool rotateButtons)
 {
   tftDisplay.setRotation(deviceSettings.screenRotation == 0 ? 1 : 3);
   tftDisplay.fillScreen(TFT_WHITE);
- // if(rotateButtons)
-//  {
-//    int reverseButtons[BUTTON_COUNT];
-//    for(int btnIdx = 0; btnIdx < BUTTON_COUNT; btnIdx++)
-//    {
-//      reverseButtons[BUTTON_COUNT - (btnIdx + 1)] = buttons[btnIdx].buttonPin;
-//    }
-//    for(int btnIdx = 0; btnIdx < BUTTON_COUNT; btnIdx++)
-//    {
-//      buttons[btnIdx].buttonPin = reverseButtons[btnIdx];
-//    }
-//  }
+  /*
+  if(rotateButtons)
+  {
+    int reverseButtons[BUTTON_COUNT];
+    for(int btnIdx = 0; btnIdx < BUTTON_COUNT; btnIdx++)
+    {
+      reverseButtons[BUTTON_COUNT - (btnIdx + 1)] = buttons[btnIdx].buttonPin;
+    }
+    for(int btnIdx = 0; btnIdx < BUTTON_COUNT; btnIdx++)
+    {
+      buttons[btnIdx].buttonPin = reverseButtons[btnIdx];
+    }
+  }
+  */
 }
 //
-// draw the Yamura banner at bottom of screen
+// draw the Yamura banner at bottom of TFT display
 //
 void YamuraBanner()
 {
@@ -501,4 +529,83 @@ void SetFont(int fontSize)
   tftDisplay.setTextDatum(TL_DATUM);
   fontHeight = tftDisplay.fontHeight(GFXFF);
   fontWidth = tftDisplay.textWidth("X");
+}
+//
+// check all buttons for new press or release
+//
+void CheckButtons(unsigned long curTime)
+{
+  int curState;
+  bool needNewLine = false;
+  //Serial.printf("Check buttons at %d\n", curTime);
+  for(byte btnIdx = 0; btnIdx < BUTTON_COUNT; btnIdx++)
+  {
+    // get current pin value
+    // low (0) = pressed, high (1) = released
+    curState = digitalRead(buttons[btnIdx].buttonPin);
+    if((buttons[btnIdx].buttonCurrent != curState) &&
+       ((curTime - buttons[btnIdx].lastChange) > BUTTON_DEBOUNCE_DELAY))
+    {
+      #ifdef DEBUG_VERBOSE
+      Serial.printf("%d\tState changed to %s\t", buttons[btnIdx].buttonPin, curState == HIGH ? "RELEASE" : "PRESS");
+      Serial.printf("%d\t%s\t", buttons[btnIdx].buttonPin, curState == HIGH ? "Actual release" : "Actual press");
+      #endif
+      buttons[btnIdx].buttonCurrent = curState;
+      buttons[btnIdx].lastChange = curTime;
+      needNewLine = true;
+      if(buttons[btnIdx].buttonCurrent == LOW)
+      {
+        buttons[btnIdx].buttonPressed = true;
+        buttons[btnIdx].buttonReleased = false;
+      }
+      else
+      {
+        buttons[btnIdx].buttonPressed =  false;
+        buttons[btnIdx].buttonReleased = true;
+      }
+    }
+  }
+}
+//
+//
+//
+void listDir(fs::FS &fs, const char *dirname, uint8_t levels) 
+{
+
+  Serial.printf("Listing directory: %s\n", dirname);
+
+  File root = fs.open(dirname);
+  if (!root) 
+  {
+    Serial.println("Failed to open directory");
+    return;
+  }
+  if (!root.isDirectory()) 
+  {
+    Serial.println("Not a directory");
+    return;
+  }
+
+  File file = root.openNextFile();
+  while (file) 
+  {
+    if (file.isDirectory()) 
+    {
+      Serial.print("  DIR : ");
+      Serial.println(file.name());
+      if (levels) 
+      {
+        listDir(fs, file.path(), levels - 1);
+      }
+    }
+    else 
+    {
+      Serial.print("  FILE: ");
+      Serial.print(file.name());
+      Serial.print("  SIZE: ");
+      Serial.println(file.size());
+      totalUsedSpace += (float)file.size();
+    }
+    file = root.openNextFile();
+  }
 }

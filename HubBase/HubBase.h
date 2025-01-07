@@ -36,13 +36,14 @@ int storeBufferIdx = -1;
 
 File logFile;
 
-int coreLED[2] = {13, 12};
+int coreLED[2] = {16, 17};
 
 TaskHandle_t Task0;
 TaskHandle_t Task1;
 // 2 1024 byte buffers - one for active store from CAN, 1 for write to microSD
 uint8_t dualBuffer[2][1024];
 char logFileName[256];
+unsigned long logStart = 0;
 unsigned long logEnd = 0;
 
 //----------------------------------------------------------------------------------------
@@ -71,6 +72,26 @@ char amPM[16];
 bool century = false;
 char dowName[7][16] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" };
 
+// user inputs
+#define BUTTON_COUNT  3
+#define BUTTON_0     13
+#define BUTTON_1     12
+#define BUTTON_2     27
+#define BUTTON_DEBOUNCE_DELAY   20   // ms
+// button debounce structure
+struct UserButton
+{
+  int buttonPin = 0;
+  bool buttonReleased = false;
+  bool buttonPressed =  false;
+  int buttonCurrent =   HIGH;
+  int buttonLast =      HIGH;
+  unsigned long lastChange = 0;
+};
+// button structure list
+UserButton buttons[BUTTON_COUNT];
+unsigned long currentMillis =   0;
+
 // TFT display
 TFT_eSPI tftDisplay = TFT_eSPI();
 int fontHeight;
@@ -92,3 +113,7 @@ struct DeviceSettings
 };
 DeviceSettings deviceSettings;
 char buffer512[512];
+int expectedIDs[10] =        {0x10,  0x20,  0x30,   0,    0,    0,    0,    0,   0,    0};
+char expectedNames[32][10] = {"A/D", "IMU", "GNSS", "\0", "\0", "\0", "\0", "\0", "\0", "\0"};
+bool reportedIDs[10] =        {0,     0,     0,      0,    0,    0,    0,    0,    0,    0};
+float totalUsedSpace = 0.0;

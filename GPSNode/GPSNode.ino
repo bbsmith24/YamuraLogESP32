@@ -10,7 +10,7 @@
 #include <SparkFun_u-blox_GNSS_Arduino_Library.h> // ZOE u-blox GPS
 #include <Wire.h>                                 //Needed for I2C to GNSS
 
-#define YAMURANODE_ID 30
+#define YAMURANODE_ID 0x30
 #define SAMPLE_INTERVAL 100
 //#define DEBUG_VERBOSE
 
@@ -97,11 +97,11 @@ void setup ()
     Serial.print("Sample point:       ");
     Serial.print(settings.samplePointFromBitStart());
     Serial.println("%");
-    Serial.println("Configuration OK!");
+    Serial.println("CAN Configuration OK!");
   }
   else
   {
-    Serial.print ("Configuration error 0x");
+    Serial.print ("CAN Configuration error 0x");
     Serial.println (errorCode, HEX);
   }
   //
@@ -231,7 +231,7 @@ void SendFrame()
 }
 void ReceiveFrame()
 {
-  if (ACAN_ESP32::can.receive (rcvFrame)) 
+  if ((ACAN_ESP32::can.receive (rcvFrame)) && (rcvFrame.id == 0x0)) 
   {
     Serial.printf("%d\t0x%02X\tIN\tid 0x%03x\tbytes\t%d\tdata", millis() + remoteTimeOffset,
                                                         YAMURANODE_ID,
@@ -246,6 +246,17 @@ void ReceiveFrame()
     {
       remoteTimeOffset = rcvFrame.data32[1] - millis();
       Serial.printf("\theartbeat offset %d\t", remoteTimeOffset);
+      // acknoledge
+      sendFrame[0].id = YAMURANODE_ID;
+      sendFrame[0].rtr = false;
+      sendFrame[0].ext = false;
+      sendFrame[0].len = 8;
+      if (!ACAN_ESP32::can.tryToSend (sendFrame[0])) 
+      {
+        //#ifdef DEBUG_VERBOSE
+        Serial.printf("\nFAILED TO SEND FRAME ID 0x%X sequence %d len %d!!!", sendFrame[0].id, 0, sendFrame[0].len);
+        //#endif
+      }
     }
     else if(rcvFrame.data32[0] == 1)
     {
