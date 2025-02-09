@@ -21,6 +21,8 @@ union AD_Structure
   AD_DataStructure adData;
   byte adBytes[AD_SIZE];
 } adStructure;
+TaskHandle_t Task0;
+TaskHandle_t Task1;
 
 //----------------------------------------------------------------------------------------
 //   Include files
@@ -42,6 +44,10 @@ bool logging;
 int digitalPins[4] = {25, 26, 27, 14};
 int analogPins[4] = {34, 35, 32, 33};
 int ledPin = 12;
+unsigned long lastOn = 0;
+unsigned long curMillis;
+unsigned long lastSent = 0;
+
 //----------------------------------------------------------------------------------------
 //   SETUP
 //----------------------------------------------------------------------------------------
@@ -102,22 +108,24 @@ void setup ()
   remoteTimeOffset = 0;
   logging = false;
   Serial.printf("Node ID 0x%02X Start!\n", YAMURANODE_ID);
+  xTaskCreatePinnedToCore(
+                    HeartbeatLEDs,   // Task function. 
+                    "Task0",     // name of task.
+                    10000,       // Stack size of task
+                    NULL,        // parameter of the task
+                    1,           // priority of the task
+                    &Task0,      // Task handle to keep track of created task
+                    0);          // pin task to core 0  
 }
 //----------------------------------------------------------------------------------------
 //   LOOP
 //----------------------------------------------------------------------------------------
 void loop() 
 {
-  if (((millis() + remoteTimeOffset)  % 2000) == 0)
+  curMillis = millis();
+  if((logging == true) && (((curMillis + remoteTimeOffset) -lastSent) >= SAMPLE_INTERVAL))
   {
-    digitalWrite(ledPin, HIGH);
-  }
-  else if (((millis() + remoteTimeOffset)  % 1000) == 0)
-  {
-    digitalWrite(ledPin, LOW);
-  }
-  if((logging == true) && (((millis() + remoteTimeOffset) % SAMPLE_INTERVAL) == 0))
-  {
+    lastSent = (curMillis + remoteTimeOffset);
     adStructure.adData.timeStamp = millis() + remoteTimeOffset;
     adStructure.adData.digital = 0;
     for(int idx = 0; idx < 4; idx++)
@@ -163,7 +171,7 @@ void SendFrame()
   #ifdef DEBUG_VERBOSE
   for(int frameIdx = 0; frameIdx < FRAME_COUNT; frameIdx++)
   {
-    Serial.printf("%d\tOUT\tid 0x%03x\tbytes\t%d\tdata", millis() + remoteTimeOffset,
+    Serial.printf("%d\tOUT\tid 0x%03x (A-D)\tbytes\t%d\tdata", millis() + remoteTimeOffset,
                                                          sendFrame[frameIdx].id,
                                                          sendFrame[frameIdx].len);
     for(int byteIdx = 0; byteIdx < 8; byteIdx++)
@@ -190,19 +198,14 @@ void ReceiveFrame()
 {
   if ((ACAN_ESP32::can.receive (rcvFrame)) && (rcvFrame.id == 0x0)) 
   {
-    Serial.printf("%d\t0x%02X\tIN\tid 0x%03x\tbytes\t%d\tdata", millis() + remoteTimeOffset,
-                                                        YAMURANODE_ID,
-                                                        rcvFrame.id,
-                                                        rcvFrame.len);
-    for(int idx = 0; idx < 8; idx++)
-    {
-      Serial.printf("\t0x%02X", (rcvFrame.data_s8[idx] & 0xFF));
-    }
     // heartbeat message
     if(rcvFrame.data32[0] == 0)
     {
       remoteTimeOffset = rcvFrame.data32[1] - millis();
-      Serial.printf("\theartbeat offset %d\t", remoteTimeOffset);
+      remoteTimeOffset += ((millis() + remoteTimeOffset) % 1000);
+      digitalWrite(12, HIGH);
+      lastOn = (millis() + remoteTimeOffset);
+      Serial.printf("%d A-D heartbeat offset %d on core %d\t", millis() + remoteTimeOffset, remoteTimeOffset, xPortGetCoreID());
       // acknoledge
       sendFrame[0].id = YAMURANODE_ID;
       sendFrame[0].rtr = false;
@@ -226,5 +229,20 @@ void ReceiveFrame()
       logging = false;
     }
     Serial.println();
+  }
+}
+//
+//
+//
+void HeartbeatLEDs(void * pvParameters)
+{
+  for(;;)
+  {
+    if (((millis() + remoteTimeOffset) - lastOn) >= 1000)
+    {
+      digitalWrite(12, !digitalRead(12));
+      lastOn = (millis() + remoteTimeOffset);
+    }
+    delay(1);
   }
 }

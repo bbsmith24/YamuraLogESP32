@@ -1,0 +1,16 @@
+[00000210]	1958 (0x07A6)	2/6/473	12:53:58	Lat 0.1145	Long 0.1856	Course 1180	Speed 200	SIV 18	Accuracy 0	
+GPS data 
+Timestamp B7 7B 01 00		00 01 7B B7 = 97207
+Year		E9 07			07 E9 = 2025
+Month		02				(02)
+Day			06				(06)
+Hour		0C				(11)
+Minute		35				(53)
+Second		3A				(58)
+actual lat/long 42.44682, -83.45583
+latitude	0D D8 4C 19		19 4C D8 0D = 424466445/10000000 = 42.44664455
+longitude	68 AC 41 CE		CE 41 AC 68 = -834556824/10000000 = -83.4556824
+course		69 35 40 00		00 00 35 69 = 13673
+Speed		19 00 00 00		00 00 00 19 = 25
+SIV			12				
+Accuracy	00 00 00 00		

@@ -26,10 +26,13 @@ static const uint32_t DESIRED_BIT_RATE = 1000UL * 1000UL;
 
 CANMessage sendFrame[2];
 CANMessage rcvFrame;
+unsigned long curMillis = 0;
+unsigned long lastSent = 0;
 unsigned long remoteTimeOffset;
 static uint32_t sendDataTime = 0;
 bool logging;
 float x, y, z;
+unsigned long lastOn = 0;
 
 // CAN message structure to send
 // 8 data bytes per CAN message, 4 frames, 32 bytes of data
@@ -39,15 +42,17 @@ float x, y, z;
 struct __attribute__((packed)) IMU_DataStructure
 {
   uint32_t timeStamp;        // 4 bytes
-  uint32_t xAccel;           // 4 bytes
-  uint32_t yAccel;           // 4 bytes
-  uint32_t zAccel;           // 4 bytes
+  float xAccel;              // 4 bytes
+  float yAccel;              // 4 bytes
+  float zAccel;              // 4 bytes
 };
 union IMU_Structure
 {
   IMU_DataStructure imuData;
   byte imuBytes[IMU_SIZE];
 } imuStructure;
+TaskHandle_t Task0;
+TaskHandle_t Task1;
 
 //----------------------------------------------------------------------------------------
 //   SETUP
@@ -115,24 +120,26 @@ void setup ()
   remoteTimeOffset = 0;
   logging = false;
   Serial.printf("Node ID 0x%02X Start!\n", YAMURANODE_ID);
+  xTaskCreatePinnedToCore(
+                    HeartbeatLEDs,   // Task function. 
+                    "Task0",     // name of task.
+                    10000,       // Stack size of task
+                    NULL,        // parameter of the task
+                    1,           // priority of the task
+                    &Task0,      // Task handle to keep track of created task
+                    0);          // pin task to core 0  
 }
 //----------------------------------------------------------------------------------------
 //   LOOP
 //----------------------------------------------------------------------------------------
 void loop() 
 {
-  if (((millis() + remoteTimeOffset)  % 2000) == 0)
+  curMillis = millis();
+  if((logging == true) && (((curMillis + remoteTimeOffset) - lastSent) >= SAMPLE_INTERVAL))
   {
-    digitalWrite(12, HIGH);
-  }
-  else if (((millis() + remoteTimeOffset)  % 1000) == 0)
-  {
-    digitalWrite(12, LOW);
-  }
-  if((logging == true) && (((millis() + remoteTimeOffset) % SAMPLE_INTERVAL) == 0))
-  {
+    lastSent = (curMillis + remoteTimeOffset);
     IMU.readAcceleration(x, y, z);
-    imuStructure.imuData.timeStamp = millis() + remoteTimeOffset;
+    imuStructure.imuData.timeStamp = curMillis + remoteTimeOffset;
     imuStructure.imuData.xAccel = x;
     imuStructure.imuData.yAccel = y;
     imuStructure.imuData.zAccel = z;
@@ -170,15 +177,16 @@ void SendFrame()
     {
       Serial.printf("\t0x%02X", (sendFrame[frameIdx].data_s8[byteIdx] & 0xFF));
     }
+    Serial.println();
   }
   #endif
   for(int frameIdx = 0; frameIdx < FRAME_COUNT; frameIdx++)
   {
     if (!ACAN_ESP32::can.tryToSend (sendFrame[frameIdx])) 
     {
-      //#ifdef DEBUG_VERBOSE
-      Serial.printf("\tFAILED TO SEND FRAME ID 0x%X sequence %d!!!", sendFrame[frameIdx].id, frameIdx);
-      //#endif
+      #ifdef DEBUG_VERBOSE
+      Serial.printf("\tFAILED TO SEND FRAME ID 0x%X sequence %d!!!\n", sendFrame[frameIdx].id, frameIdx);
+      #endif
     }
   }
   #ifdef DEBUG_VERBOSE
@@ -189,19 +197,14 @@ void ReceiveFrame()
 {
   if ((ACAN_ESP32::can.receive (rcvFrame)) && (rcvFrame.id == 0x0)) 
   {
-    Serial.printf("%d\t0x%02X\tIN\tid 0x%03x\tbytes\t%d\tdata", millis() + remoteTimeOffset,
-                                                        YAMURANODE_ID,
-                                                        rcvFrame.id,
-                                                        rcvFrame.len);
-    for(int idx = 0; idx < 8; idx++)
-    {
-      Serial.printf("\t0x%02X", (rcvFrame.data_s8[idx] & 0xFF));
-    }
     // heartbeat message
     if(rcvFrame.data32[0] == 0)
     {
       remoteTimeOffset = rcvFrame.data32[1] - millis();
-      Serial.printf("\theartbeat offset %d\t", remoteTimeOffset);
+      remoteTimeOffset += ((millis() + remoteTimeOffset) % 1000);
+      digitalWrite(12, HIGH);
+      lastOn = (millis() + remoteTimeOffset);
+      Serial.printf("%d IMU heartbeat offset %d on core %d\t", millis() + remoteTimeOffset, remoteTimeOffset, xPortGetCoreID());
       // acknoledge
       sendFrame[0].id = YAMURANODE_ID;
       sendFrame[0].rtr = false;
@@ -209,9 +212,9 @@ void ReceiveFrame()
       sendFrame[0].len = 8;
       if (!ACAN_ESP32::can.tryToSend (sendFrame[0])) 
       {
-        //#ifdef DEBUG_VERBOSE
+        #ifdef DEBUG_VERBOSE
         Serial.printf("\tFAILED TO SEND FRAME ID 0x%X sequence %d len %d!!!\n", sendFrame[0].id, 0, sendFrame[0].len);
-        //#endif
+        #endif
       }
     }
     else if(rcvFrame.data32[0] == 1)
@@ -225,5 +228,20 @@ void ReceiveFrame()
       logging = false;
     }
     Serial.println();
+  }
+}
+//
+//
+//
+void HeartbeatLEDs(void * pvParameters)
+{
+  for(;;)
+  {
+    if (((millis() + remoteTimeOffset) - lastOn) >= 1000)
+    {
+      digitalWrite(12, !digitalRead(12));
+      lastOn = (millis() + remoteTimeOffset);
+    }
+    delay(1);
   }
 }

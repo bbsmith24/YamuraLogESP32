@@ -20,7 +20,7 @@ SFE_UBLOX_GNSS gnssDevice;
 // 8 data bytes per CAN message, 4 frames, 32 bytes of data
 #define GPS_SIZE 32
 #define FRAME_COUNT 4
-//
+// 28 total bytes of payload
 struct __attribute__((packed)) GPS_DataStructure
 {
   uint32_t timeStamp;        // 4 bytes
@@ -30,8 +30,8 @@ struct __attribute__((packed)) GPS_DataStructure
   uint8_t gpsHour;           // 1
   uint8_t gpsMinute;         // 1
   uint8_t gpsSecond;         // 1
-  int32_t latitude;          // 4
-  int32_t longitude;         // 4
+  int32_t latitude;          // 4 (*10000000 to avoid using floating point)
+  int32_t longitude;         // 4 (*10000000 to avoid using floating point)
   int32_t course;            // 4
   int32_t speed;             // 4
   uint8_t SIV;               // 1
@@ -51,6 +51,11 @@ unsigned long remoteTimeOffset;
 static uint32_t sendDataTime = 0;
 bool logging;
 char buffer512[512];
+unsigned long lastBlink = 0;
+TaskHandle_t Task0;
+TaskHandle_t Task1;
+unsigned long lastOn = 0;
+
 //----------------------------------------------------------------------------------------
 //   SETUP
 //----------------------------------------------------------------------------------------
@@ -141,6 +146,15 @@ void setup ()
   remoteTimeOffset = 0;
   logging = false;
   Serial.printf("Node ID 0x%02X Start!\n", YAMURANODE_ID);
+  xTaskCreatePinnedToCore(
+                    HeartbeatLEDs,   // Task function. 
+                    "Task0",     // name of task.
+                    10000,       // Stack size of task
+                    NULL,        // parameter of the task
+                    1,           // priority of the task
+                    &Task0,      // Task handle to keep track of created task
+                    0);          // pin task to core 0  
+  Serial.printf("setup on core %d\n", xPortGetCoreID());
   delay(2000); // Give the module some extra time to get ready
 }
 //----------------------------------------------------------------------------------------
@@ -148,14 +162,6 @@ void setup ()
 //----------------------------------------------------------------------------------------
 void loop() 
 {
-  if (((millis() + remoteTimeOffset)  % 2000) == 0)
-  {
-    digitalWrite(12, HIGH);
-  }
-  else if (((millis() + remoteTimeOffset)  % 1000) == 0)
-  {
-    digitalWrite(12, LOW);
-  }
   // check GPS for update
   // Calling getPVT returns true if there actually is a fresh navigation solution available.
   // Start the reading only when valid LLH is available
@@ -168,13 +174,16 @@ void loop()
     gps.gpsData.gpsHour =   gnssDevice.getHour();
     gps.gpsData.gpsMinute = gnssDevice.getMinute();
     gps.gpsData.gpsSecond = gnssDevice.getSecond();
-    gps.gpsData.latitude =  gnssDevice.getLatitude();
-    gps.gpsData.longitude = gnssDevice.getLongitude();
-    gps.gpsData.course =    gnssDevice.getHeading();
-    gps.gpsData.speed =     gnssDevice.getGroundSpeed();
+    gps.gpsData.latitude =  gnssDevice.getLatitude();    // *10000000
+    gps.gpsData.longitude = gnssDevice.getLongitude();   // *10000000
+    gps.gpsData.course =    gnssDevice.getHeading();     // *100000
+    gps.gpsData.speed =     gnssDevice.getGroundSpeed(); // mm/s
     gps.gpsData.SIV =       gnssDevice.getSIV();
-    gps.gpsData.accuracy =  0;
+    gps.gpsData.accuracy =  0; // not used
     SendFrame();
+  }
+  else
+  {
   }
   ReceiveFrame();
   delay(1);
@@ -207,7 +216,7 @@ void SendFrame()
   #ifdef DEBUG_VERBOSE
   for(int frameIdx = 0; frameIdx < FRAME_COUNT; frameIdx++)
   {
-    Serial.printf("%d\tOUT\tid 0x%03x\tbytes\t%d\tdata", millis(),
+    Serial.printf("%d\tOUT (GPS)\tid 0x%03x (GPS)\tbytes\t%d\tdata", millis(),
                                                          sendFrame[frameIdx].id,
                                                          sendFrame[frameIdx].len);
     for(int byteIdx = 0; byteIdx < 8; byteIdx++)
@@ -233,19 +242,14 @@ void ReceiveFrame()
 {
   if ((ACAN_ESP32::can.receive (rcvFrame)) && (rcvFrame.id == 0x0)) 
   {
-    Serial.printf("%d\t0x%02X\tIN\tid 0x%03x\tbytes\t%d\tdata", millis() + remoteTimeOffset,
-                                                        YAMURANODE_ID,
-                                                        rcvFrame.id,
-                                                        rcvFrame.len);
-    for(int idx = 0; idx < 8; idx++)
-    {
-      Serial.printf("\t0x%02X", (rcvFrame.data_s8[idx] & 0xFF));
-    }
     // heartbeat message
     if(rcvFrame.data32[0] == 0)
     {
       remoteTimeOffset = rcvFrame.data32[1] - millis();
-      Serial.printf("\theartbeat offset %d\t", remoteTimeOffset);
+      remoteTimeOffset += ((millis() + remoteTimeOffset) % 1000);
+      digitalWrite(12, HIGH);
+      lastOn = (millis() + remoteTimeOffset);
+      Serial.printf("%d GPS heartbeat offset %d on core %d\t", millis() + remoteTimeOffset, remoteTimeOffset, xPortGetCoreID());
       // acknoledge
       sendFrame[0].id = YAMURANODE_ID;
       sendFrame[0].rtr = false;
@@ -269,5 +273,17 @@ void ReceiveFrame()
       logging = false;
     }
     Serial.println();
+  }
+}
+void HeartbeatLEDs(void * pvParameters)
+{
+  for(;;)
+  {
+    if ((((millis() + remoteTimeOffset) - lastOn) >= 1000))
+    {
+      digitalWrite(12, !digitalRead(12));
+      lastOn = (millis() + remoteTimeOffset);
+    }
+    delay(1);
   }
 }

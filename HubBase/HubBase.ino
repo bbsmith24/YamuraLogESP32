@@ -10,7 +10,15 @@
 //----------------------------------------------------------------------------------------
 
 #include "HubBase.h"
+#include "TFT_UserMenus.h"
 
+#define MAIN_MENU 0
+#define SETTINGS_MENU 1
+#define DRIVERS_MENU 2
+#define YESNO_MENU 3
+#define END_LOGGING_MENU 4
+
+TFTMenus menuSystem;
 //----------------------------------------------------------------------------------------
 //   SETUP
 //----------------------------------------------------------------------------------------
@@ -58,22 +66,57 @@ void setup ()
   }
   digitalWrite(coreLED[0], LOW);
 
-  Serial.println("=====================");
-  Serial.println("| tft display setup |");
-  Serial.println("=====================");
+  Serial.println("===============================");
+  Serial.println("| tft display and menus setup |");
+  Serial.println("===============================");
+  Serial.println("==================================");
+  Serial.println("| TFT Display User Menu example  |");
+  Serial.println("==================================");  
+
+  Serial.println("Add menus");
+  menuSystem.AddMenu("Main Menu", false);
+  menuSystem.AddMenu("Settings", false);
+  menuSystem.AddMenu("Drivers", false);
+  menuSystem.AddMenu("Yes/No", true);
+  menuSystem.AddMenu("End Logging", false);
+  // main menu
+  menuSystem.menus[MAIN_MENU].AddMenuChoice(0, "Start Logging", LogData);
+  menuSystem.menus[MAIN_MENU].AddMenuChoice(1, "Brian", DriverSelection);
+  menuSystem.menus[MAIN_MENU].AddMenuChoice(2, "Settings", Settings);
+  menuSystem.ListChoices(MAIN_MENU);
+  // settings submenu
+  menuSystem.menus[SETTINGS_MENU].AddMenuChoice(0,  "Set Date/Time", SetDateTime);
+  menuSystem.menus[SETTINGS_MENU].AddMenuChoice(1,  "Invert Screen", InvertScreen);
+  menuSystem.menus[SETTINGS_MENU].AddMenuChoice(2,  "Font Size", SetFontSize);
+  menuSystem.menus[SETTINGS_MENU].AddMenuChoice(3,  "Delete Data", DeleteData);
+  menuSystem.menus[SETTINGS_MENU].AddMenuChoice(4,  "IP 192.168.4.1", NoAction);
+  menuSystem.menus[SETTINGS_MENU].AddMenuChoice(5, "Password ZoeyDora48375", NoAction);
+  menuSystem.menus[SETTINGS_MENU].AddMenuChoice(6, "Save Settings", SaveSettings);
+  menuSystem.menus[SETTINGS_MENU].AddMenuChoice(7, "Exit", ExitSettings);
+  menuSystem.ListChoices(SETTINGS_MENU);
+  // driver/car submenu
+  menuSystem.menus[DRIVERS_MENU].AddMenuChoice(0, "Brian", SetDriver);
+  menuSystem.menus[DRIVERS_MENU].AddMenuChoice(1, "Mark", SetDriver);
+  menuSystem.menus[DRIVERS_MENU].AddMenuChoice(2, "Rob", SetDriver);
+  menuSystem.ListChoices(DRIVERS_MENU);
+  //
+  menuSystem.menus[YESNO_MENU].AddMenuChoice(0, "Yes", YesNo);
+  menuSystem.menus[YESNO_MENU].AddMenuChoice(1, "No", YesNo);
+  menuSystem.ListChoices(YESNO_MENU);
+  //
+  menuSystem.menus[END_LOGGING_MENU].AddMenuChoice(0, "End Logging", EndLogging);
+  menuSystem.ListChoices(END_LOGGING_MENU);
+  // set the main menu as current
+  menuSystem.SetCurrentMenu(MAIN_MENU);
+
   tftDisplay.init();
-  tftDisplay.invertDisplay(false);
-  RotateDisplay(true);  
-  w = tftDisplay.width();
-  h = tftDisplay.height();
-  textPosition[0] = 5;
-  textPosition[1] = 0;
-  // 0 portrait pins down
-  // 1 landscape pins right
-  // 2 portrait pins up
-  // 3 landscape pins left
-  tftDisplay.fillScreen(TFT_BLACK);
-  YamuraBanner();
+  menuSystem.Setup(&tftDisplay);
+  strcpy(buffer512, "  Yamura Motors LLC Data Logger  ");
+  Serial.printf("Set banner text to: %s\n", buffer512);
+  menuSystem.SetBannerText(buffer512);
+  Serial.printf("Banner text set to: %s\n", menuSystem.bannerText);
+
+  menuSystem.Banner();
   SetFont(deviceSettings.fontPoints);
   tftDisplay.setTextColor(TFT_WHITE, TFT_BLACK);
   tftDisplay.drawString("Yamura Motors LLC Data Logger", textPosition[0], textPosition[1], GFXFF);
@@ -112,7 +155,8 @@ void setup ()
   }
   char magnitude[5][16] = {"bytes", "KB", "MB", "GB", "TB"};
   totalUsedSpace = 0.0;
-  listDir(SD, "/", 10);
+  listDir(SD, "/", logFileIdx, 10, ".log");
+  Serial.printf("Log file count %d\n", logFileIdx);
   float cardSize = (float)SD.cardSize();// / (1024 * 1024);
   float freeSize = cardSize - totalUsedSpace;
   int cardMagnitudeCount = 0;
@@ -255,7 +299,8 @@ void setup ()
     Serial.printf("Buttons[%d].buttonPin = %d\n", idx, buttons[idx].buttonPin);
     pinMode(buttons[idx].buttonPin, INPUT_PULLUP);
   }
-  CheckButtons(millis());
+  menuSystem.CheckButtons(millis());
+  menuSystem.DisplayMenu(MAIN_MENU);
 }
 //----------------------------------------------------------------------------------------
 //   LOOP
@@ -263,64 +308,18 @@ void setup ()
 void loop() 
 {
   BaseType_t coreID;
-  if ((millis() % 2000) == 0)
+  if(millis() % 10000 == 0)
   {
     digitalWrite(coreLED[0], HIGH);
-  }
-  else if ((millis()  % 1000) == 0)
-  {
-    digitalWrite(coreLED[0], LOW);
-  }
-
-  if((logging == false) && (millis() % 10000 == 0))
-  {
     SendFrame(0); // heartbeat
   }
-  // check buttons
-  CheckButtons(millis());
-  // start logging on any serial input
-  if(buttons[0].buttonReleased == true)
-  {
-    buttons[0].buttonReleased = false;
-    if(logging == false)
-    {
-      logFileIdx++;
-      sprintf(logFileName, "/logFile%d.log", logFileIdx);
-	    hour = rtcDevice.getHour(h12Flag, pmFlag);
-      minute = rtcDevice.getMinute();
-      second = rtcDevice.getSecond();
-      sprintf(buffer512, " %02d:%02d:%02d START LOG %s          ", hour, minute, second, logFileName);
-      Serial.println(buffer512);
-      tftDisplay.drawString(buffer512, textPosition[0], fontHeight * 8, GFXFF);
-      deleteFile(SD, logFileName);
-      logFile = SD.open(logFileName, FILE_WRITE);
-      logFile.print("XXXXXXXXXXXX");
-      if(!logFile)
-      {
-        Serial.printf("Failed to open %s for write - no logging\n", logFileName);
-      }
-      else
-      {
-        logStart= millis();
-        logging = true;
-        SendFrame(1); // start logging
-      }
-    }
-    else if(logging == true)
-    {
-      logging = false;
-    	hour = rtcDevice.getHour(h12Flag, pmFlag);
-	    minute = rtcDevice.getMinute();
-  	  second = rtcDevice.getSecond();
 
-      logFile.close();
-      SendFrame(2); // stop logging
-      logEnd= millis();
-      sprintf(buffer512, " %02d:%02d:%02d END LOG %s %0.2fs         ", hour, minute, second, logFileName, (float)(logEnd-logStart)/1000.0);
-      tftDisplay.drawString(buffer512, textPosition[0], fontHeight * 8, GFXFF);
-      Serial.println(buffer512);
-    }
+  if ((millis() % 1000) == 0)
+  {
+    digitalWrite(coreLED[0], !digitalRead(coreLED[0]));
   }
+  // check buttons
+  menuSystem.GetUserInput();
   ReceiveFrame();
   delay(1);
 }
@@ -489,20 +488,6 @@ void RotateDisplay(bool rotateButtons)
   */
 }
 //
-// draw the Yamura banner at bottom of TFT display
-//
-void YamuraBanner()
-{
-  Serial.println("Data Logger");
-  tftDisplay.setTextColor(TFT_BLACK, TFT_YELLOW);
-  SetFont(9);
-  int xPos = tftDisplay.width()/2;
-  int yPos = tftDisplay.height() - fontHeight/2;
-  tftDisplay.setTextDatum(BC_DATUM);
-  tftDisplay.drawString("  Yamura Motors LLC Data Logger  ",xPos, yPos, GFXFF);    // Print the font name onto the TFT screen
-  tftDisplay.setTextDatum(TL_DATUM);
-}
-//
 // set font for TFT display, update fontHeight used for vertical stepdown by line
 //
 void SetFont(int fontSize)
@@ -531,45 +516,9 @@ void SetFont(int fontSize)
   fontWidth = tftDisplay.textWidth("X");
 }
 //
-// check all buttons for new press or release
-//
-void CheckButtons(unsigned long curTime)
-{
-  int curState;
-  bool needNewLine = false;
-  //Serial.printf("Check buttons at %d\n", curTime);
-  for(byte btnIdx = 0; btnIdx < BUTTON_COUNT; btnIdx++)
-  {
-    // get current pin value
-    // low (0) = pressed, high (1) = released
-    curState = digitalRead(buttons[btnIdx].buttonPin);
-    if((buttons[btnIdx].buttonCurrent != curState) &&
-       ((curTime - buttons[btnIdx].lastChange) > BUTTON_DEBOUNCE_DELAY))
-    {
-      #ifdef DEBUG_VERBOSE
-      Serial.printf("%d\tState changed to %s\t", buttons[btnIdx].buttonPin, curState == HIGH ? "RELEASE" : "PRESS");
-      Serial.printf("%d\t%s\t", buttons[btnIdx].buttonPin, curState == HIGH ? "Actual release" : "Actual press");
-      #endif
-      buttons[btnIdx].buttonCurrent = curState;
-      buttons[btnIdx].lastChange = curTime;
-      needNewLine = true;
-      if(buttons[btnIdx].buttonCurrent == LOW)
-      {
-        buttons[btnIdx].buttonPressed = true;
-        buttons[btnIdx].buttonReleased = false;
-      }
-      else
-      {
-        buttons[btnIdx].buttonPressed =  false;
-        buttons[btnIdx].buttonReleased = true;
-      }
-    }
-  }
-}
 //
 //
-//
-void listDir(fs::FS &fs, const char *dirname, uint8_t levels) 
+void listDir(fs::FS &fs, const char *dirname, int &fileCount, uint8_t levels, char* ext) 
 {
 
   Serial.printf("Listing directory: %s\n", dirname);
@@ -595,11 +544,15 @@ void listDir(fs::FS &fs, const char *dirname, uint8_t levels)
       Serial.println(file.name());
       if (levels) 
       {
-        listDir(fs, file.path(), levels - 1);
+        listDir(fs, file.path(), fileCount, levels - 1, ext);
       }
     }
     else 
     {
+      if(strstr(file.name(), ext) != NULL)
+      {
+        fileCount++;
+      }
       Serial.print("  FILE: ");
       Serial.print(file.name());
       Serial.print("  SIZE: ");
@@ -608,4 +561,189 @@ void listDir(fs::FS &fs, const char *dirname, uint8_t levels)
     }
     file = root.openNextFile();
   }
+}
+
+//
+// menu choice handlers
+//
+void LogData()
+{
+  menuSystem.tftDisplay->fillScreen(TFT_GREEN);
+  menuSystem.tftDisplay->setTextColor(TFT_WHITE, TFT_GREEN);
+  sprintf(logFileName, "/logFile%03d.log", logFileIdx);
+  hour = rtcDevice.getHour(h12Flag, pmFlag);
+  minute = rtcDevice.getMinute();
+  second = rtcDevice.getSecond();
+  sprintf(buffer512, " %02d:%02d:%02d START LOG %s          ", hour, minute, second, logFileName);
+
+  textPosition[1] = fontHeight * 2;
+  tftDisplay.drawString(buffer512, textPosition[0], textPosition[1], GFXFF);
+  textPosition[1] += fontHeight;
+  tftDisplay.drawString("Press SELECT to end", textPosition[0], textPosition[1], GFXFF);
+  textPosition[1] += fontHeight;
+  deleteFile(SD, logFileName);
+  logFile = SD.open(logFileName, FILE_WRITE);
+  logFile.print("XXXXXXXXXXXX");
+  if(!logFile)
+  {
+    tftDisplay.drawString("Failed to open %s for write - not logging", textPosition[0], textPosition[1], GFXFF);
+    delay(5000);
+    menuSystem.DisplayMenu(MAIN_MENU);
+    return;
+  }
+  logStart= millis();
+  logging = true;
+  SendFrame(1); // start logging
+  menuSystem.buttons[0].buttonReleased = 0;
+  menuSystem.buttons[0].buttonPressed = 0;
+  menuSystem.buttons[1].buttonReleased = 0;
+  menuSystem.buttons[1].buttonPressed = 0;
+  menuSystem.buttons[2].buttonReleased = 0;
+  menuSystem.buttons[2].buttonPressed = 0;
+  while(true)
+  {
+    menuSystem.CheckButtons(millis());
+    if((menuSystem.buttons[0].buttonReleased) ||
+       (menuSystem.buttons[1].buttonReleased) ||
+       (menuSystem.buttons[2].buttonReleased))
+    {
+      menuSystem.buttons[0].buttonReleased = 0;
+      menuSystem.buttons[0].buttonPressed = 0;
+      menuSystem.buttons[1].buttonReleased = 0;
+      menuSystem.buttons[1].buttonPressed = 0;
+      menuSystem.buttons[2].buttonReleased = 0;
+      menuSystem.buttons[2].buttonPressed = 0;
+      logging = false;
+      hour = rtcDevice.getHour(h12Flag, pmFlag);
+	    minute = rtcDevice.getMinute();
+      second = rtcDevice.getSecond();
+
+      logFile.close();
+      logFileIdx++;
+      SendFrame(2); // stop logging
+      logEnd= millis();
+
+      menuSystem.tftDisplay->fillScreen(TFT_RED);
+      menuSystem.tftDisplay->setTextColor(TFT_WHITE, TFT_RED);
+      textPosition[1] = fontHeight * 2;
+
+      sprintf(buffer512, " %02d:%02d:%02d END LOG %s %0.2fs         ", hour, minute, second, logFileName, (float)(logEnd-logStart)/1000.0);
+      tftDisplay.drawString(buffer512, textPosition[0], textPosition[1], GFXFF);
+      delay(5000);
+      break;
+    }
+    ReceiveFrame();
+    delay(1);
+  }
+  menuSystem.tftDisplay->fillScreen(TFT_WHITE);
+  menuSystem.tftDisplay->setTextColor(TFT_BLACK, TFT_WHITE);
+  menuSystem.DisplayMenu(MAIN_MENU);
+  return;
+}
+void EndLogging()
+{
+  logging = false;
+  hour = rtcDevice.getHour(h12Flag, pmFlag);
+	minute = rtcDevice.getMinute();
+  second = rtcDevice.getSecond();
+
+  logFile.close();
+  SendFrame(2); // stop logging
+  logEnd= millis();
+  menuSystem.priorDisplayRange[0] = 0;
+  menuSystem.priorDisplayRange[1] = menuSystem.menus[MAIN_MENU].menuLength;
+  menuSystem.menus[MAIN_MENU].priorChoice = 0;
+  menuSystem.currentDisplayRange[0] = 0;
+  menuSystem.currentDisplayRange[1] = menuSystem.menus[MAIN_MENU].menuLength;
+  menuSystem.menus[MAIN_MENU].curChoice = 0;
+  menuSystem.DisplayMenu(MAIN_MENU);
+  sprintf(buffer512, " %02d:%02d:%02d END LOG %s %0.2fs         ", hour, minute, second, logFileName, (float)(logEnd-logStart)/1000.0);
+  tftDisplay.drawString(buffer512, textPosition[0], fontHeight * 8, GFXFF);
+  Serial.println(buffer512);
+  return;
+}
+void DriverSelection()
+{
+  Serial.println("DriverSelection");
+  menuSystem.DisplayMenu(DRIVERS_MENU);
+  return;
+}
+void Settings()
+{
+  Serial.println("Settings");
+  menuSystem.DisplayMenu(SETTINGS_MENU);
+  return;
+}
+void SetDateTime()
+{
+  Serial.println("Set Date/Time");
+  return;
+}
+void InvertScreen()
+{
+  Serial.println("InvertScreen");
+  return;
+}
+void SetFontSize()
+{
+  Serial.println("SetFontSize");
+  return;
+}
+void DeleteData()
+{
+  while(true)
+  {
+    strcpy(menuSystem.menus[YESNO_MENU].menuName, "Delete all data?");
+    menuSystem.DisplayMenu(YESNO_MENU);
+    menuSystem.GetUserInput();
+    if(menuSystem.GetCurrentSelection() == 0)
+    {
+      Serial.println("Delete Data");
+      menuSystem.DrawText("Delete Data", menuSystem.textPosition[0], menuSystem.textPosition[1] + menuSystem.fontHeight, TFT_WHITE, TFT_RED);
+      delay(2000);
+      break;
+    }
+    else if(menuSystem.GetCurrentSelection() == 1)
+    {
+      Serial.println("Delete Data cancelled");
+      menuSystem.DrawText("Delete Data cancelled", menuSystem.textPosition[0], menuSystem.textPosition[1] + menuSystem.fontHeight, TFT_WHITE, TFT_RED);
+      delay(2000);
+      break;
+    }
+  }
+  menuSystem.SetCurrentMenu(MAIN_MENU);
+  return;
+}
+void SaveSettings()
+{
+  Serial.println("SaveSettings");
+  menuSystem.SetCurrentMenu(MAIN_MENU);
+  return;
+}
+void ExitSettings()
+{
+  Serial.println("ExitSettings");
+  menuSystem.DisplayMenu(MAIN_MENU);
+  return;
+}
+void SetDriver()
+{
+  Serial.print("SetDriver - selected ");
+
+  menuSystem.menus[MAIN_MENU].AddMenuChoice(1,
+                                            menuSystem.menus[DRIVERS_MENU].choiceList[menuSystem.GetCurrentSelection()].description, 
+                                            DriverSelection);
+
+  Serial.println(menuSystem.GetCurrentSelection());
+  menuSystem.DisplayMenu(MAIN_MENU);
+  return;
+}
+//
+void YesNo()
+{
+  return;
+}
+void NoAction()
+{
+  return;
 }
