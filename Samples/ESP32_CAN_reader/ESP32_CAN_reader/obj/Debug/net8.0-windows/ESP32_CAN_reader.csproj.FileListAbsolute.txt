@@ -1,0 +1,16 @@
+D:\OneDrive\Documents\Experimental\ESP32_CAN_reader\ESP32_CAN_reader\bin\Debug\net8.0-windows\ESP32_CAN_reader.exe
+D:\OneDrive\Documents\Experimental\ESP32_CAN_reader\ESP32_CAN_reader\bin\Debug\net8.0-windows\ESP32_CAN_reader.deps.json
+D:\OneDrive\Documents\Experimental\ESP32_CAN_reader\ESP32_CAN_reader\bin\Debug\net8.0-windows\ESP32_CAN_reader.runtimeconfig.json
+D:\OneDrive\Documents\Experimental\ESP32_CAN_reader\ESP32_CAN_reader\bin\Debug\net8.0-windows\ESP32_CAN_reader.dll
+D:\OneDrive\Documents\Experimental\ESP32_CAN_reader\ESP32_CAN_reader\bin\Debug\net8.0-windows\ESP32_CAN_reader.pdb
+D:\OneDrive\Documents\Experimental\ESP32_CAN_reader\ESP32_CAN_reader\obj\Debug\net8.0-windows\ESP32_CAN_reader.Form1.resources
+D:\OneDrive\Documents\Experimental\ESP32_CAN_reader\ESP32_CAN_reader\obj\Debug\net8.0-windows\ESP32_CAN_reader.csproj.GenerateResource.cache
+D:\OneDrive\Documents\Experimental\ESP32_CAN_reader\ESP32_CAN_reader\obj\Debug\net8.0-windows\ESP32_CAN_reader.GeneratedMSBuildEditorConfig.editorconfig
+D:\OneDrive\Documents\Experimental\ESP32_CAN_reader\ESP32_CAN_reader\obj\Debug\net8.0-windows\ESP32_CAN_reader.AssemblyInfoInputs.cache
+D:\OneDrive\Documents\Experimental\ESP32_CAN_reader\ESP32_CAN_reader\obj\Debug\net8.0-windows\ESP32_CAN_reader.AssemblyInfo.cs
+D:\OneDrive\Documents\Experimental\ESP32_CAN_reader\ESP32_CAN_reader\obj\Debug\net8.0-windows\ESP32_CAN_reader.csproj.CoreCompileInputs.cache
+D:\OneDrive\Documents\Experimental\ESP32_CAN_reader\ESP32_CAN_reader\obj\Debug\net8.0-windows\ESP32_CAN_reader.dll
+D:\OneDrive\Documents\Experimental\ESP32_CAN_reader\ESP32_CAN_reader\obj\Debug\net8.0-windows\refint\ESP32_CAN_reader.dll
+D:\OneDrive\Documents\Experimental\ESP32_CAN_reader\ESP32_CAN_reader\obj\Debug\net8.0-windows\ESP32_CAN_reader.pdb
+D:\OneDrive\Documents\Experimental\ESP32_CAN_reader\ESP32_CAN_reader\obj\Debug\net8.0-windows\ESP32_CAN_reader.genruntimeconfig.cache
+D:\OneDrive\Documents\Experimental\ESP32_CAN_reader\ESP32_CAN_reader\obj\Debug\net8.0-windows\ref\ESP32_CAN_reader.dll
