@@ -16,6 +16,8 @@
 #include <DS3231-RTC.h>
 #include <TFT_eSPI.h>            // https://github.com/Bodmer/TFT_eSPI Graphics and font library for ST7735 driver chip
 #include "Free_Fonts.h"          // Include the header file attached to this sketch
+#include <WiFi.h>
+#include <ESP32_FTPClient.h>
 
 #define YAMURANODE_ID 0
 //#define DEBUG_VERBOSE

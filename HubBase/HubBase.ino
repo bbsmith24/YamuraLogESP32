@@ -19,6 +19,17 @@
 #define END_LOGGING_MENU 4
 
 TFTMenus menuSystem;
+
+// Replace with your network credentials
+const char* ssid = "FamilyRoom";
+const char* password = "ZoeyDora48375";
+
+// FTP server credentials
+const char* ftp_server = "192.168.0.20";
+const char* ftp_user = "vito";
+const char* ftp_pass = "passwrd";
+const char* working_dir   = "/media/share/alarms/esp32cam1/"; // Change to the desired directory on FTP server
+
 //----------------------------------------------------------------------------------------
 //   SETUP
 //----------------------------------------------------------------------------------------
@@ -746,4 +757,59 @@ void YesNo()
 void NoAction()
 {
   return;
+}
+void uploadFile(const char* path) {
+    ftp.OpenConnection();
+    ftp.ChangeWorkDir(working_dir);  // Change to the desired directory on FTP server
+    ftp.InitFile("Type I");
+
+    ftp.NewFile(path);
+    
+    File file = SD_MMC.open("/" + String(path));
+    if (!file) {
+        Serial.println("Failed to open file for reading");
+        return;
+    }
+
+    const size_t bufferSize = 512;
+    uint8_t buffer[bufferSize];
+    while (file.available()) {
+        size_t bytesRead = file.read(buffer, bufferSize);
+        ftp.WriteData(buffer, bytesRead);
+        Serial.println("File available");
+        Serial.println(path);
+        Serial.println("Uploading file"+ file);
+    }
+
+    ftp.CloseFile();
+    ftp.CloseConnection();
+
+    file.close();
+    Serial.println("File uploaded successfully");
+}
+
+void listAndUploadFiles(fs::FS &fs, const char* dirname) 
+{
+    File root = fs.open(dirname);
+    if (!root) {
+        Serial.println("Failed to open directory");
+        return;
+    }
+    if (!root.isDirectory()) {
+        Serial.println("Not a directory");
+        return;
+    }
+
+    File file = root.openNextFile();
+    while (file) {
+        if (file.isDirectory()) {
+            listAndUploadFiles(fs, file.name());  // Recursively list files in subdirectories
+        } else {
+            // Serial.print("Uploading file: ");
+            Serial.println(file.name());
+            uploadFile(file.name());
+           Serial.println("Uploading file" + file);
+        }
+        file = root.openNextFile();
+    }
 }
